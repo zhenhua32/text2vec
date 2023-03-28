@@ -21,6 +21,9 @@ os.environ["TOKENIZERS_PARALLELISM"] = "TRUE"
 
 
 class EncoderType(Enum):
+    """
+    编码器类型
+    """
     FIRST_LAST_AVG = 0
     LAST_AVG = 1
     CLS = 2
@@ -132,8 +135,9 @@ class SentenceModel:
             convert_to_numpy: bool = True,
             convert_to_tensor: bool = False,
             device: str = None,
-        ):
+    ):
         """
+        主函数, 基于pretrained model计算文本向量
         Returns the embeddings for a batch of sentences.
 
         :param sentences: str/list, Input sentences
@@ -146,21 +150,29 @@ class SentenceModel:
         self.bert.eval()
         if device is None:
             device = self.device
+        # 优先级更高
         if convert_to_tensor:
             convert_to_numpy = False
+        # 转换文本输入, 统一为 list
         input_is_string = False
         if isinstance(sentences, str) or not hasattr(sentences, "__len__"):
             sentences = [sentences]
             input_is_string = True
 
         all_embeddings = []
+        # 将句子按长度降序, 返回的是索引位置
         length_sorted_idx = np.argsort([-len(s) for s in sentences])
+        # 重新排序后的句子, 长度降序
         sentences_sorted = [sentences[idx] for idx in length_sorted_idx]
+        # 按批次处理
         for start_index in trange(0, len(sentences), batch_size, desc="Batches", disable=not show_progress_bar):
+            # 当前批次的句子
             sentences_batch = sentences_sorted[start_index: start_index + batch_size]
+            # 计算句子向量
             # Compute sentences embeddings
             with torch.no_grad():
                 embeddings = self.get_sentence_embeddings(
+                    # 填充到当前批次最大长度
                     **self.tokenizer(sentences_batch, max_length=self.max_seq_length,
                                      padding=True, truncation=True, return_tensors='pt').to(device)
                 )
@@ -168,12 +180,14 @@ class SentenceModel:
             if convert_to_numpy:
                 embeddings = embeddings.cpu()
             all_embeddings.extend(embeddings)
+        # 按照原始顺序返回
         all_embeddings = [all_embeddings[idx] for idx in np.argsort(length_sorted_idx)]
         if convert_to_tensor:
             all_embeddings = torch.stack(all_embeddings)
         elif convert_to_numpy:
             all_embeddings = np.asarray([emb.numpy() for emb in all_embeddings])
 
+        # 如果输入是字符串, 则返回第一个向量, 让结构保持一致
         if input_is_string:
             all_embeddings = all_embeddings[0]
 
