@@ -64,6 +64,7 @@ class SentenceModel:
         thus, we use <last_hidden_state>.
         """
         self.model_name_or_path = model_name_or_path
+        # 有多种编码器可选
         encoder_type = EncoderType.from_string(encoder_type) if isinstance(encoder_type, str) else encoder_type
         if encoder_type not in list(EncoderType):
             raise ValueError(f"encoder_type must be in {list(EncoderType)}")
@@ -84,6 +85,7 @@ class SentenceModel:
 
     def get_sentence_embeddings(self, input_ids, attention_mask, token_type_ids):
         """
+        获取模型输出, 基于不同的编码器类型, 返回的 shape 都是 (batch_size, hidden_size)
         Returns the model output by encoder_type as embeddings.
 
         Utility function for self.bert() method.
@@ -93,25 +95,40 @@ class SentenceModel:
         if self.encoder_type == EncoderType.FIRST_LAST_AVG:
             # Get the first and last hidden states, and average them to get the embeddings
             # hidden_states have 13 list, second is hidden_state
+            # shape: (batch_size, sequence_length, hidden_size)
             first = model_output.hidden_states[1]
             last = model_output.hidden_states[-1]
             seq_length = first.size(1)  # Sequence length
 
+            # shape change list:
+            # first.transpose(1, 2) -> (batch_size, hidden_size, sequence_length)
+            # torch.avg_pool1d -> (batch_size, hidden_size, 1)
+            # 1 = (sequence_length + 2 * padding - kernel_size) / stride + 1 = 0 / kernel_size + 1
+            # squeeze(-1) -> (batch_size, hidden_size)
             first_avg = torch.avg_pool1d(first.transpose(1, 2), kernel_size=seq_length).squeeze(-1)  # [batch, hid_size]
             last_avg = torch.avg_pool1d(last.transpose(1, 2), kernel_size=seq_length).squeeze(-1)  # [batch, hid_size]
+            # shape change list:
+            # first_avg.unsqueeze(1) -> (batch_size, 1, hidden_size)
+            # torch.cat -> (batch_size, 2, hidden_size)
+            # transpose(1, 2) -> (batch_size, hidden_size, 2)
+            # torch.avg_pool1d -> (batch_size, hidden_size, 1)
+            # squeeze(-1) -> (batch_size, hidden_size) 
             final_encoding = torch.avg_pool1d(
                 torch.cat([first_avg.unsqueeze(1), last_avg.unsqueeze(1)], dim=1).transpose(1, 2),
                 kernel_size=2).squeeze(-1)
+            # final_encoding shape: (batch_size, hidden_size)
             return final_encoding
 
         if self.encoder_type == EncoderType.LAST_AVG:
             sequence_output = model_output.last_hidden_state  # [batch_size, max_len, hidden_size]
             seq_length = sequence_output.size(1)
             final_encoding = torch.avg_pool1d(sequence_output.transpose(1, 2), kernel_size=seq_length).squeeze(-1)
+            # final_encoding shape: (batch_size, hidden_size)
             return final_encoding
 
         if self.encoder_type == EncoderType.CLS:
             sequence_output = model_output.last_hidden_state
+            # 这个就是取第一个维度的第一个元素, 也就是取第一个token的向量
             return sequence_output[:, 0]  # [batch, hid_size]
 
         if self.encoder_type == EncoderType.POOLER:
@@ -122,7 +139,16 @@ class SentenceModel:
             Mean Pooling - Take attention mask into account for correct averaging
             """
             token_embeddings = model_output.last_hidden_state  # Contains all token embeddings
+            # shape change list:
+            # attention_mask.unsqueeze(-1) -> (batch_size, sequence_length, 1)
+            # expand -> (batch_size, sequence_length, hidden_size)
             input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+            # shape change list:
+            # token_embeddings * input_mask_expanded -> (batch_size, sequence_length, hidden_size)
+            # sum -> (batch_size, hidden_size)
+            # input_mask_expanded.sum(1) -> (batch_size, hidden_size)
+            # torch.clamp -> (batch_size, hidden_size) # 保证最小值为 1e-9
+            # / -> (batch_size, hidden_size)
             final_encoding = torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
                 input_mask_expanded.sum(1), min=1e-9)
             return final_encoding  # [batch, hid_size]
