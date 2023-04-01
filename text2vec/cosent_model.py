@@ -38,6 +38,7 @@ class CosentModel(SentenceModel):
             max_seq_length: The maximum total input sequence length after tokenization.
             device: The device on which the model is allocated.
         """
+        # 模型已经在这里加载了
         super().__init__(model_name_or_path, encoder_type, max_seq_length, device)
 
     def __str__(self):
@@ -64,6 +65,7 @@ class CosentModel(SentenceModel):
             hf_dataset_name: str = "STS-B",
     ):
         """
+        是用来训练模型的
         Trains the model on 'train_file'
 
         Args:
@@ -87,6 +89,7 @@ class CosentModel(SentenceModel):
             global_step: Number of global steps trained
             training_details: full training progress scores
         """
+        # 加载数据集
         if use_hf_dataset and hf_dataset_name:
             logger.info(
                 f"Train_file will be ignored when use_hf_dataset is True, load HF dataset: {hf_dataset_name}")
@@ -100,6 +103,7 @@ class CosentModel(SentenceModel):
         else:
             raise ValueError("Error, train_file|use_hf_dataset must be specified")
 
+        # 调用真正的训练过程
         global_step, training_details = self.train(
             train_dataset,
             output_dir,
@@ -160,6 +164,7 @@ class CosentModel(SentenceModel):
             max_steps: int = -1
     ):
         """
+        真正的训练过程
         Trains the model on train_dataset.
 
         Utility function to be used by the train_model() method. Not intended to be used directly.
@@ -169,8 +174,10 @@ class CosentModel(SentenceModel):
         self.bert.to(self.device)
         set_seed(seed)
 
+        # 为什么没有 shuffle=True
         train_dataloader = DataLoader(train_dataset, shuffle=False, batch_size=batch_size)
         total_steps = len(train_dataloader) * num_epochs
+        # 参数分组
         param_optimizer = list(self.bert.named_parameters())
         no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
         optimizer_grouped_parameters = [
@@ -179,6 +186,7 @@ class CosentModel(SentenceModel):
             {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
         ]
 
+        # 预热步数, 优化器, 学习率调度器 初始化
         warmup_steps = math.ceil(total_steps * warmup_ratio)  # by default 10% of _train data for warm-up
         optimizer = AdamW(optimizer_grouped_parameters, lr=lr, eps=eps, correct_bias=False)
         scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps,
@@ -197,16 +205,20 @@ class CosentModel(SentenceModel):
         steps_trained_in_current_epoch = 0
         epochs_trained = 0
 
+        # 如果目录存在
         if self.model_name_or_path and os.path.exists(self.model_name_or_path):
             try:
                 # set global_step to global_step of last saved checkpoint from model path
                 checkpoint_suffix = self.model_name_or_path.split("/")[-1].split("-")
+                # 就是取第二位的名字, 是训练步数
                 if len(checkpoint_suffix) > 2:
                     checkpoint_suffix = checkpoint_suffix[1]
                 else:
                     checkpoint_suffix = checkpoint_suffix[-1]
                 global_step = int(checkpoint_suffix)
+                # 总步数 // (训练集大小 // 梯度累积步数)
                 epochs_trained = global_step // (len(train_dataloader) // gradient_accumulation_steps)
+                # 当前 epoch 训练的步数
                 steps_trained_in_current_epoch = global_step % (len(train_dataloader) // gradient_accumulation_steps)
                 logger.info("   Continuing training from checkpoint, will skip to saved global_step")
                 logger.info("   Continuing training from epoch %d" % epochs_trained)
@@ -215,6 +227,7 @@ class CosentModel(SentenceModel):
             except ValueError:
                 logger.info("   Starting fine-tuning.")
 
+        # 保存训练过程中的指标
         training_progress_scores = {
             "global_step": [],
             "train_loss": [],
@@ -224,6 +237,7 @@ class CosentModel(SentenceModel):
         for current_epoch in trange(int(num_epochs), desc="Epoch", disable=False, mininterval=0):
             self.bert.train()
             current_loss = 0
+            # 跳过已经训练过的 epoch
             if epochs_trained > 0:
                 epochs_trained -= 1
                 continue
@@ -232,16 +246,21 @@ class CosentModel(SentenceModel):
                                   disable=False,
                                   mininterval=0)
             for step, batch in enumerate(batch_iterator):
+                # 跳过已经训练过的步数
                 if steps_trained_in_current_epoch > 0:
                     steps_trained_in_current_epoch -= 1
                     continue
+                # 的确只有一个输入
                 inputs, labels = batch
                 labels = labels.to(self.device)
                 # inputs        [batch, 1, seq_len] -> [batch, seq_len]
                 input_ids = inputs.get('input_ids').squeeze(1).to(self.device)
                 attention_mask = inputs.get('attention_mask').squeeze(1).to(self.device)
                 token_type_ids = inputs.get('token_type_ids').squeeze(1).to(self.device)
+                # output_embeddings (batch, hidden_size)
                 output_embeddings = self.get_sentence_embeddings(input_ids, attention_mask, token_type_ids)
+                # 计算损失
+                # labels: (batch_size,)
                 loss = self.calc_loss(labels, output_embeddings)
                 current_loss = loss.item()
                 if verbose:
@@ -259,6 +278,7 @@ class CosentModel(SentenceModel):
                     optimizer.zero_grad()
                     global_step += 1
             epoch_number += 1
+            # 有格式的, 第二个参数是当前总步数, 第四个是当前 epoch
             output_dir_current = os.path.join(output_dir, "checkpoint-{}-epoch-{}".format(global_step, epoch_number))
             results = self.eval_model(eval_dataset, output_dir_current, verbose=verbose, batch_size=batch_size)
             self.save_model(output_dir_current, model=self.bert, results=results)
@@ -266,15 +286,18 @@ class CosentModel(SentenceModel):
             training_progress_scores["train_loss"].append(current_loss)
             for key in results:
                 training_progress_scores[key].append(results[key])
+            # 保存成 csv
             report = pd.DataFrame(training_progress_scores)
             report.to_csv(os.path.join(output_dir, "training_progress_scores.csv"), index=False)
 
+            # 当前最佳是根据 eval_spearman 来评价的
             eval_spearman = results["eval_spearman"]
             if eval_spearman > best_eval_metric:
                 best_eval_metric = eval_spearman
                 logger.info(f"Save new best model, best_eval_metric: {best_eval_metric}")
                 self.save_model(output_dir, model=self.bert, results=results)
 
+            # 如果达到最大步数, 就停止训练. 即当 global_step > max_steps 时, 就停止训练
             if 0 < max_steps < global_step:
                 return global_step, training_progress_scores
 
