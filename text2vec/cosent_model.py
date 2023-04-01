@@ -126,24 +126,41 @@ class CosentModel(SentenceModel):
 
     def calc_loss(self, y_true, y_pred):
         """
+        https://kexue.fm/archives/8847
         矩阵计算batch内的cos loss
+        y_true: (batch_size, )
+        y_pred: (batch_size, hidden_size)
         """
         # 1. 取出真实的标签
+        # shape change from (batch_size, ) to (batch_size // 2, )
         y_true = y_true[::2]  # tensor([1, 0, 1]) 真实的标签
         # 2. 对输出的句子向量进行l2归一化   后面只需要对应为相乘  就可以得到cos值了
+        # norms shape: (batch_size, 1)
         norms = (y_pred ** 2).sum(axis=1, keepdims=True) ** 0.5
+        # L2范数是一种衡量向量大小的方法，它定义为向量的各个元素的平方和的平方根。
+        # y_pred shape: (batch_size, hidden_size)
         y_pred = y_pred / norms
         # 3. 奇偶向量相乘, 相似度矩阵除以温度系数0.05(等于*20)
+        # shape chang list:
+        # y_pred[::2] shape: (batch_size // 2, hidden_size) 原文中的第一列文本
+        # y_pred[1::2] shape: (batch_size // 2, hidden_size) 原文中的第二列文本
+        # torch.sum shape: (batch_size // 2, )
         y_pred = torch.sum(y_pred[::2] * y_pred[1::2], dim=1) * 20
         # 4. 取出负例-正例的差值
+        # y_pred[:, None] shape: (batch_size // 2, 1), y_pred[None, :] shape: (1, batch_size // 2)
+        # y_pred shape: (batch_size // 2, batch_size // 2)
         y_pred = y_pred[:, None] - y_pred[None, :]  # 这里是算出所有位置 两两之间余弦的差值
         # 矩阵中的第i行j列  表示的是第i个余弦值-第j个余弦值
+        # y_true shape: (batch_size // 2, batch_size // 2)
         y_true = y_true[:, None] < y_true[None, :]  # 取出负例-正例的差值
         y_true = y_true.float()
         y_pred = y_pred - (1 - y_true) * 1e12
+        # 变成只有一个维度的, y_pred shape: ( (batch_size // 2) ** 2, )
         y_pred = y_pred.view(-1)
         # 这里加0是因为e^0 = 1相当于在log中加了1
+        # y_pred shape: ( (batch_size // 2) ** 2 + 1, )
         y_pred = torch.cat((torch.tensor([0]).float().to(self.device), y_pred), dim=0)
+        # 返回一个标量, 返回给定维度dim中输入张量的每一行的总指数对数
         return torch.logsumexp(y_pred, dim=0)
 
     def train(
@@ -257,10 +274,11 @@ class CosentModel(SentenceModel):
                 input_ids = inputs.get('input_ids').squeeze(1).to(self.device)
                 attention_mask = inputs.get('attention_mask').squeeze(1).to(self.device)
                 token_type_ids = inputs.get('token_type_ids').squeeze(1).to(self.device)
-                # output_embeddings (batch, hidden_size)
                 output_embeddings = self.get_sentence_embeddings(input_ids, attention_mask, token_type_ids)
                 # 计算损失
                 # labels: (batch_size,)
+                # output_embeddings: (batch_size, hidden_size)
+                # TODO: 我没看懂这个维度是怎么缩减的
                 loss = self.calc_loss(labels, output_embeddings)
                 current_loss = loss.item()
                 if verbose:
