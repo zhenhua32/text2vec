@@ -30,6 +30,7 @@ class CosentModel(SentenceModel):
     ):
         """
         Initializes a CoSENT Model.
+        模型主要先看这块
 
         Args:
             model_name_or_path: Default Transformer model name or path to a directory containing Transformer model file (pytorch_nodel.bin).

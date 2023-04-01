@@ -221,6 +221,7 @@ class SentenceModel:
 
     def eval_model(self, eval_dataset: Dataset, output_dir: str = None, verbose: bool = True, batch_size: int = 16):
         """
+        执行评估
         Evaluates the model on eval_df. Saves results to args.output_dir
             result: Dictionary containing evaluation results.
         """
@@ -234,6 +235,7 @@ class SentenceModel:
 
     def evaluate(self, eval_dataset, output_dir: str = None, batch_size: int = 16):
         """
+        具体的评估过程, 返回的 results 中有两个 key, 分别是 eval_spearman 和 eval_pearson
         Evaluates the model on eval_dataset.
 
         Utility function to be used by the eval_model() method. Not intended to be used directly.
@@ -249,7 +251,9 @@ class SentenceModel:
         for batch in tqdm(eval_dataloader, disable=False, desc="Running Evaluation"):
             source, target, labels = batch
             labels = labels.to(self.device)
+            # 记录真实标签
             batch_labels.extend(labels.cpu().numpy())
+            # 这个输入有点坑, 一般是不带中间的 1 的
             # source        [batch, 1, seq_len] -> [batch, seq_len]
             source_input_ids = source.get('input_ids').squeeze(1).to(self.device)
             source_attention_mask = source.get('attention_mask').squeeze(1).to(self.device)
@@ -265,6 +269,7 @@ class SentenceModel:
                                                                  source_token_type_ids)
                 target_embeddings = self.get_sentence_embeddings(target_input_ids, target_attention_mask,
                                                                  target_token_type_ids)
+                # 计算余弦相似度 shape: [batch]
                 preds = torch.cosine_similarity(source_embeddings, target_embeddings)
             batch_preds.extend(preds.cpu().numpy())
 
@@ -276,6 +281,7 @@ class SentenceModel:
 
         results["eval_spearman"] = spearman
         results["eval_pearson"] = pearson
+        # 输出到目录中
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
             with open(os.path.join(output_dir, "eval_results.txt"), "w") as writer:
@@ -286,6 +292,8 @@ class SentenceModel:
 
     def save_model(self, output_dir, model, results=None):
         """
+        保存模型, 没想到 model 是传进来的, 而不是用 self.bert
+        也会保存 tokenizer
         Saves the model to output_dir.
         :param output_dir:
         :param model:
@@ -298,6 +306,7 @@ class SentenceModel:
         model_to_save.save_pretrained(output_dir)
         self.tokenizer.save_pretrained(output_dir)
         if results:
+            # 可选保存评估结果
             output_eval_file = os.path.join(output_dir, "eval_results.txt")
             with open(output_eval_file, "w") as writer:
                 for key in sorted(results.keys()):
