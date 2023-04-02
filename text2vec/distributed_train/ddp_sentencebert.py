@@ -209,7 +209,8 @@ def train_loop(global_rank, world_size):
             if steps_trained_in_current_epoch > 0:
                 steps_trained_in_current_epoch -= 1
                 continue
-            with torch.autograd.set_detect_anomaly(True):
+            # 当需要调试的时候, 可以设置为 True, 但是会影响性能
+            with torch.autograd.set_detect_anomaly(False):
                 # 输入居然是不一样的, 现在有三个输入了, 需要重新确认下数据集
                 source, target, labels = batch
                 # source        [batch, 1, seq_len] -> [batch, seq_len]
@@ -224,12 +225,21 @@ def train_loop(global_rank, world_size):
 
                 # get sentence embeddings of BERT encoder
                 # TODO: 分布式上多 GPU 好像有问题, 但我没多 GPU, 没法测试. 单 GPU 也有问题, 看起来是分布式有问题
-                source_embeddings = self.get_sentence_embeddings(
-                    source_input_ids, source_attention_mask, source_token_type_ids
-                )
-                target_embeddings = self.get_sentence_embeddings(
-                    target_input_ids, target_attention_mask, target_token_type_ids
-                )
+                # 问题可能是出现在连续的 forward 中, 但是我不知道怎么解决
+                # https://github.com/huggingface/transformers/issues/7848
+                # source_embeddings = self.get_sentence_embeddings(
+                #     source_input_ids, source_attention_mask, source_token_type_ids
+                # )
+                # target_embeddings = self.get_sentence_embeddings(
+                #     target_input_ids, target_attention_mask, target_token_type_ids
+                # )
+                # shape: (batch * 2, seq_len)
+                input_ids = torch.cat([source_input_ids, target_input_ids], dim=0)
+                attention_mask = torch.cat([source_attention_mask, target_attention_mask], dim=0)
+                token_type_ids = torch.cat([source_token_type_ids, target_token_type_ids], dim=0)
+                embeddings = self.get_sentence_embeddings(input_ids, attention_mask, token_type_ids)
+                # source_embeddings, target_embeddings = torch.split(embeddings, source_input_ids.size(0), dim=0)
+                source_embeddings, target_embeddings = torch.chunk(embeddings, 2, dim=0)
                 # 结合了两个输出
                 logits = self.concat_embeddings(source_embeddings, target_embeddings)
                 loss = self.calc_loss(labels, logits)
