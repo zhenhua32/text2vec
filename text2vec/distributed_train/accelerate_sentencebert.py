@@ -18,6 +18,7 @@ from tqdm.auto import tqdm, trange
 from transformers.optimization import AdamW, get_linear_schedule_with_warmup
 
 import sys
+
 # 需要将根目录加进来, 即 D:\code\github\text2vec
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from text2vec.sentence_model import SentenceModel
@@ -27,19 +28,19 @@ from text2vec.text_matching_dataset import (
     load_test_data,
     load_train_data,
     HFTextMatchingTestDataset,
-    HFTextMatchingTrainDataset
+    HFTextMatchingTrainDataset,
 )
 from text2vec.utils.stats_util import set_seed
 
 
 class SentenceBertModel(SentenceModel):
     def __init__(
-            self,
-            model_name_or_path: str = "hfl/chinese-macbert-base",
-            encoder_type: str = "MEAN",
-            max_seq_length: int = 128,
-            num_classes: int = 2,
-            device: str = None,
+        self,
+        model_name_or_path: str = "hfl/chinese-macbert-base",
+        encoder_type: str = "MEAN",
+        max_seq_length: int = 128,
+        num_classes: int = 2,
+        device: str = None,
     ):
         """
         Initializes a SentenceBert Model.
@@ -56,8 +57,10 @@ class SentenceBertModel(SentenceModel):
         self.classifier = nn.Linear(self.bert.config.hidden_size * 3, num_classes).to(self.device)
 
     def __str__(self):
-        return f"<SentenceBertModel: {self.model_name_or_path}, encoder_type: {self.encoder_type}, " \
-               f"max_seq_length: {self.max_seq_length}>"
+        return (
+            f"<SentenceBertModel: {self.model_name_or_path}, encoder_type: {self.encoder_type}, "
+            f"max_seq_length: {self.max_seq_length}>"
+        )
 
     def concat_embeddings(self, source_embeddings, target_embeddings):
         """
@@ -94,11 +97,11 @@ def train_loop():
     device = accelerator.device
 
     sentence_bert_model = SentenceBertModel(model_name_or_path="bert-base-chinese", device=device)
-    hf_dataset_name: str = "STS-B"
     # 神之偷懒
     self = sentence_bert_model
 
     # 从 huggingface 的数据集中加载数据
+    # hf_dataset_name: str = "STS-B"
     # train_dataset = HFTextMatchingTrainDataset(self.tokenizer, hf_dataset_name, max_len=self.max_seq_length)
     # eval_dataset = HFTextMatchingTestDataset(self.tokenizer, hf_dataset_name, max_len=self.max_seq_length)
 
@@ -131,18 +134,21 @@ def train_loop():
     train_dataloader = DataLoader(train_dataset, shuffle=False, batch_size=batch_size)
     total_steps = len(train_dataloader) * num_epochs
     param_optimizer = list(self.bert.named_parameters())
-    no_decay = ['bias', 'LayerNorm.bias', 'LayerNorm.weight']
+    no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)],
-            'weight_decay': weight_decay},
-        {'params': [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        {
+            "params": [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)],
+            "weight_decay": weight_decay,
+        },
+        {"params": [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
     ]
 
     warmup_steps = math.ceil(total_steps * warmup_ratio)  # by default 10% of _train data for warm-up
     optimizer = AdamW(optimizer_grouped_parameters, lr=lr, eps=eps, correct_bias=False)
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps,
-                                                num_training_steps=total_steps)
-    
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer, num_warmup_steps=warmup_steps, num_training_steps=total_steps
+    )
+
     # 该用 accelerator 替换了
     sentence_bert_model.bert, optimizer, train_dataloader, scheduler = accelerator.prepare(
         sentence_bert_model.bert,
@@ -196,10 +202,9 @@ def train_loop():
         if epochs_trained > 0:
             epochs_trained -= 1
             continue
-        batch_iterator = tqdm(train_dataloader,
-                                desc=f"Running Epoch {epoch_number + 1} of {num_epochs}",
-                                disable=False,
-                                mininterval=0)
+        batch_iterator = tqdm(
+            train_dataloader, desc=f"Running Epoch {epoch_number + 1} of {num_epochs}", disable=False, mininterval=0
+        )
         for step, batch in enumerate(batch_iterator):
             if steps_trained_in_current_epoch > 0:
                 steps_trained_in_current_epoch -= 1
@@ -207,28 +212,31 @@ def train_loop():
             # 输入居然是不一样的, 现在有三个输入了, 需要重新确认下数据集
             source, target, labels = batch
             # source        [batch, 1, seq_len] -> [batch, seq_len]
-            source_input_ids = source.get('input_ids').squeeze(1).to(self.device)
-            source_attention_mask = source.get('attention_mask').squeeze(1).to(self.device)
-            source_token_type_ids = source.get('token_type_ids').squeeze(1).to(self.device)
+            source_input_ids = source.get("input_ids").squeeze(1).to(self.device)
+            source_attention_mask = source.get("attention_mask").squeeze(1).to(self.device)
+            source_token_type_ids = source.get("token_type_ids").squeeze(1).to(self.device)
             # target        [batch, 1, seq_len] -> [batch, seq_len]
-            target_input_ids = target.get('input_ids').squeeze(1).to(self.device)
-            target_attention_mask = target.get('attention_mask').squeeze(1).to(self.device)
-            target_token_type_ids = target.get('token_type_ids').squeeze(1).to(self.device)
+            target_input_ids = target.get("input_ids").squeeze(1).to(self.device)
+            target_attention_mask = target.get("attention_mask").squeeze(1).to(self.device)
+            target_token_type_ids = target.get("token_type_ids").squeeze(1).to(self.device)
             labels = labels.to(self.device)
 
             # get sentence embeddings of BERT encoder
             # TODO: 分布式上多 GPU 好像有问题, 但我没多 GPU, 没法测试
-            source_embeddings = self.get_sentence_embeddings(source_input_ids, source_attention_mask,
-                                                                source_token_type_ids)
-            target_embeddings = self.get_sentence_embeddings(target_input_ids, target_attention_mask,
-                                                                target_token_type_ids)
+            source_embeddings = self.get_sentence_embeddings(
+                source_input_ids, source_attention_mask, source_token_type_ids
+            )
+            target_embeddings = self.get_sentence_embeddings(
+                target_input_ids, target_attention_mask, target_token_type_ids
+            )
             # 结合了两个输出
             logits = self.concat_embeddings(source_embeddings, target_embeddings)
             loss = self.calc_loss(labels, logits)
             current_loss = loss.item()
             if verbose:
                 batch_iterator.set_description(
-                    f"Epoch: {epoch_number + 1}/{num_epochs}, Batch:{step}/{len(train_dataloader)}, Loss: {current_loss:9.4f}")
+                    f"Epoch: {epoch_number + 1}/{num_epochs}, Batch:{step}/{len(train_dataloader)}, Loss: {current_loss:9.4f}"
+                )
 
             if gradient_accumulation_steps > 1:
                 loss = loss / gradient_accumulation_steps
