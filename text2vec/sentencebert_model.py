@@ -47,6 +47,7 @@ class SentenceBertModel(SentenceModel):
             device: CPU or GPU
         """
         super().__init__(model_name_or_path, encoder_type, max_seq_length, device)
+        # 多了一个分类器
         self.classifier = nn.Linear(self.bert.config.hidden_size * 3, num_classes).to(self.device)
 
     def __str__(self):
@@ -96,6 +97,7 @@ class SentenceBertModel(SentenceModel):
             global_step: Number of global steps trained
             training_details: Full training progress scores
         """
+        # 注意, 数据集是不一样的
         if use_hf_dataset and hf_dataset_name:
             logger.info(
                 f"Train_file will be ignored when use_hf_dataset is True, load HF dataset: {hf_dataset_name}")
@@ -109,6 +111,7 @@ class SentenceBertModel(SentenceModel):
         else:
             raise ValueError("Error, train_file|use_hf_dataset must be specified")
 
+        # 相似的, 用 train 方法进行实际的训练
         global_step, training_details = self.train(
             train_dataset,
             output_dir,
@@ -139,13 +142,16 @@ class SentenceBertModel(SentenceModel):
         """
         # (u, v, |u - v|)
         embs = [source_embeddings, target_embeddings, torch.abs(source_embeddings - target_embeddings)]
+        # input_embs shape: [batch_size, 3 * hidden_size]
         input_embs = torch.cat(embs, 1)
         # fc layer
+        # logits shape: [batch_size, num_classes]
         logits = self.classifier(input_embs)
         return logits
 
     def calc_loss(self, y_true, y_pred):
         """
+        交叉熵
         Calc loss with two sentence embeddings, Softmax loss
         """
         loss = nn.CrossEntropyLoss()(y_pred, y_true)
@@ -178,6 +184,7 @@ class SentenceBertModel(SentenceModel):
         self.bert.to(self.device)
         set_seed(seed)
 
+        # 同样是不使用 shuffle
         train_dataloader = DataLoader(train_dataset, shuffle=False, batch_size=batch_size)
         total_steps = len(train_dataloader) * num_epochs
         param_optimizer = list(self.bert.named_parameters())
@@ -206,6 +213,7 @@ class SentenceBertModel(SentenceModel):
         steps_trained_in_current_epoch = 0
         epochs_trained = 0
 
+        # 这些步骤和 cosent 一样
         if self.model_name_or_path and os.path.exists(self.model_name_or_path):
             try:
                 # set global_step to global_step of last saved checkpoint from model path
@@ -244,6 +252,7 @@ class SentenceBertModel(SentenceModel):
                 if steps_trained_in_current_epoch > 0:
                     steps_trained_in_current_epoch -= 1
                     continue
+                # 输入居然是不一样的, 现在有三个输入了, 需要重新确认下数据集
                 source, target, labels = batch
                 # source        [batch, 1, seq_len] -> [batch, seq_len]
                 source_input_ids = source.get('input_ids').squeeze(1).to(self.device)
@@ -260,6 +269,7 @@ class SentenceBertModel(SentenceModel):
                                                                  source_token_type_ids)
                 target_embeddings = self.get_sentence_embeddings(target_input_ids, target_attention_mask,
                                                                  target_token_type_ids)
+                # 结合了两个输出
                 logits = self.concat_embeddings(source_embeddings, target_embeddings)
                 loss = self.calc_loss(labels, logits)
                 current_loss = loss.item()

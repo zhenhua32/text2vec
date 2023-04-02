@@ -18,11 +18,14 @@ def load_train_data(path):
     with open(path, 'r', encoding='utf8') as f:
         for line in f:
             line = line.strip().split('\t')
+            # 需要有三列
             if len(line) != 3:
                 logger.warning(f'line size not match, pass: {line}')
                 continue
+            # 最后一列是分数
             score = int(line[2])
             if 'STS' in path.upper():
+                # 有 STS-B 任务, 需要转换成 0/1 标签
                 score = int(score > 2.5)
             data.append((line[0], line[1], score))
     return data
@@ -38,6 +41,7 @@ def load_test_data(path):
             if len(line) != 3:
                 logger.warning(f'line size not match, pass: {line}')
                 continue
+            # 读取测试集的时候, 就是直接将分数转成 int, 没了 sts 的判断过程
             data.append((line[0], line[1], int(line[2])))
     return data
 
@@ -63,7 +67,9 @@ class TextMatchingTrainDataset(Dataset):
 
 
 class TextMatchingTestDataset(Dataset):
-    """文本匹配测试数据集, 重写__getitem__和__len__方法"""
+    """文本匹配测试数据集, 重写__getitem__和__len__方法
+    没看出来和 TextMatchingTrainDataset 有什么区别
+    """
 
     def __init__(self, tokenizer: PreTrainedTokenizer, data: list, max_len: int = 64):
         self.tokenizer = tokenizer
@@ -93,6 +99,7 @@ class HFTextMatchingTrainDataset(Dataset):
 
     def __init__(self, tokenizer: PreTrainedTokenizer, name="STS-B", max_len: int = 64):
         self.tokenizer = tokenizer
+        # 数据集还是同一份, 和 cosent 的数据集是一样的, 即 HFCosentTrainDataset 类
         self.data = load_dataset("shibing624/nli_zh", name.upper(), split="train")
         self.max_len = max_len
         self.name = name.upper()
@@ -122,6 +129,7 @@ class HFTextMatchingTestDataset(Dataset):
 
     def __init__(self, tokenizer: PreTrainedTokenizer, name="STS-B", max_len: int = 64, split="validation"):
         self.tokenizer = tokenizer
+        # 用了不同的 split, 测试集用的是 validation
         self.data = load_dataset("shibing624/nli_zh", name.upper(), split=split)
         self.max_len = max_len
 

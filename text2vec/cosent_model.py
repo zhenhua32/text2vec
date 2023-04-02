@@ -94,6 +94,7 @@ class CosentModel(SentenceModel):
             logger.info(
                 f"Train_file will be ignored when use_hf_dataset is True, load HF dataset: {hf_dataset_name}")
             train_dataset = HFCosentTrainDataset(self.tokenizer, hf_dataset_name, max_len=self.max_seq_length)
+            # 我当时居然没注意到, 测试集用的类是不同的
             eval_dataset = HFTextMatchingTestDataset(self.tokenizer, hf_dataset_name, max_len=self.max_seq_length)
         elif train_file is not None:
             logger.info(
