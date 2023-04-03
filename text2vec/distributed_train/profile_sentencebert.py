@@ -180,7 +180,7 @@ def profile_main():
 
             # 循环 10 次
             count += 1
-            if count > 10:
+            if count >= 10:
                 break
 
     # 打印性能报告
