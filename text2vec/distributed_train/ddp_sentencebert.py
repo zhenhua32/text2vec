@@ -235,8 +235,6 @@ def train_loop(global_rank, world_size):
                 labels = labels.to(self.device)
 
                 # get sentence embeddings of BERT encoder
-                # TODO: 分布式上多 GPU 好像有问题, 但我没多 GPU, 没法测试. 单 GPU 也有问题, 看起来是分布式有问题
-                # 问题可能是出现在连续的 forward 中, 但是我不知道怎么解决
                 # https://github.com/huggingface/transformers/issues/7848
                 source_embeddings = self.get_sentence_embeddings(
                     source_input_ids, source_attention_mask, source_token_type_ids
@@ -263,7 +261,6 @@ def train_loop(global_rank, world_size):
                 if gradient_accumulation_steps > 1:
                     loss = loss / gradient_accumulation_steps
 
-                # TODO: 报错主要是在反向传播的过程中触发的, 因为这个时候需要计算梯度
                 loss.backward()
                 if (step + 1) % gradient_accumulation_steps == 0:
                     torch.nn.utils.clip_grad_norm_(self.bert.parameters(), max_grad_norm)
@@ -297,10 +294,6 @@ def train_loop(global_rank, world_size):
 
 
 if __name__ == "__main__":
-    """
-    TODO: 单 GPU 也能出现在这个问题
-    RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation: [torch.cuda.LongTensor [1, 128]] is at version 4; expected version 3 instead. Hint: enable anomaly detection to find the operation that failed to compute its gradient, with torch.autograd.set_detect_anomaly(True).
-    """
     # 使用 mp.spawn 启动多进程
     world_size = torch.cuda.device_count()
     mp.spawn(train_loop, nprocs=world_size, args=(world_size,))
