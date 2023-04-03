@@ -92,10 +92,14 @@ class SentenceBertModel(SentenceModel):
 def train_loop(global_rank, world_size):
     logger.info("global_rank: {}, world_size: {}".format(global_rank, world_size))
     # windows 用 gloo, linux 用 nccl
-    dist.init_process_group(backend="gloo", init_method="tcp://localhost:23456", rank=0, world_size=1)
+    dist.init_process_group(
+        backend="gloo", init_method="tcp://localhost:23456", rank=global_rank, world_size=world_size
+    )
 
     device = torch.device("cuda:{}".format(global_rank))
-    sentence_bert_model = SentenceBertModel(model_name_or_path="bert-base-chinese", encoder_type="POOLER", device=device)
+    sentence_bert_model = SentenceBertModel(
+        model_name_or_path="bert-base-chinese", encoder_type="POOLER", device=device
+    )
     # 神之偷懒
     self = sentence_bert_model
 
@@ -150,7 +154,14 @@ def train_loop(global_rank, world_size):
     )
 
     # 该用 DDP 替换了. 先不用 find_unused_parameters
-    self.bert = DDP(self.bert, device_ids=[global_rank], output_device=global_rank, find_unused_parameters=False)
+    self.bert = DDP(
+        self.bert,
+        device_ids=[global_rank],
+        output_device=global_rank,
+        find_unused_parameters=False,
+        # 加了 broadcast_buffers 可以防止 RuntimeError: one of the variables needed for gradient computation has been modified by an inplace operation
+        broadcast_buffers=False,
+    )
 
     logger.info("***** Running training *****")
     logger.info(f"  Num examples = {len(train_dataset)}")
@@ -227,19 +238,19 @@ def train_loop(global_rank, world_size):
                 # TODO: 分布式上多 GPU 好像有问题, 但我没多 GPU, 没法测试. 单 GPU 也有问题, 看起来是分布式有问题
                 # 问题可能是出现在连续的 forward 中, 但是我不知道怎么解决
                 # https://github.com/huggingface/transformers/issues/7848
-                # source_embeddings = self.get_sentence_embeddings(
-                #     source_input_ids, source_attention_mask, source_token_type_ids
-                # )
-                # target_embeddings = self.get_sentence_embeddings(
-                #     target_input_ids, target_attention_mask, target_token_type_ids
-                # )
-                # shape: (batch * 2, seq_len)
-                input_ids = torch.cat([source_input_ids, target_input_ids], dim=0)
-                attention_mask = torch.cat([source_attention_mask, target_attention_mask], dim=0)
-                token_type_ids = torch.cat([source_token_type_ids, target_token_type_ids], dim=0)
-                embeddings = self.get_sentence_embeddings(input_ids, attention_mask, token_type_ids)
+                source_embeddings = self.get_sentence_embeddings(
+                    source_input_ids, source_attention_mask, source_token_type_ids
+                )
+                target_embeddings = self.get_sentence_embeddings(
+                    target_input_ids, target_attention_mask, target_token_type_ids
+                )
+                # shape: (batch * 2, seq_len) 合并了两个输入, 训练会更快些
+                # input_ids = torch.cat([source_input_ids, target_input_ids], dim=0)
+                # attention_mask = torch.cat([source_attention_mask, target_attention_mask], dim=0)
+                # token_type_ids = torch.cat([source_token_type_ids, target_token_type_ids], dim=0)
+                # embeddings = self.get_sentence_embeddings(input_ids, attention_mask, token_type_ids)
                 # source_embeddings, target_embeddings = torch.split(embeddings, source_input_ids.size(0), dim=0)
-                source_embeddings, target_embeddings = torch.chunk(embeddings, 2, dim=0)
+                # source_embeddings, target_embeddings = torch.chunk(embeddings, 2, dim=0)
                 # 结合了两个输出
                 logits = self.concat_embeddings(source_embeddings, target_embeddings)
                 loss = self.calc_loss(labels, logits)
