@@ -30,6 +30,8 @@ from text2vec.text_matching_dataset import (
     TextMatchingTrainDataset,
     load_test_data,
     load_train_data,
+    my_load_dataset,
+    MyTextMatchingTrainDataset,
 )
 from text2vec.utils.stats_util import set_seed
 
@@ -111,7 +113,7 @@ def train_loop(global_rank, world_size):
     # 从本地加载数据
     train_file = r"D:\code\github\text2vec\examples\data\STS-B\STS-B.train.data"
     eval_file = r"D:\code\github\text2vec\examples\data\STS-B\STS-B.valid.data"
-    train_dataset = TextMatchingTrainDataset(self.tokenizer, load_train_data(train_file), self.max_seq_length)
+    train_dataset = MyTextMatchingTrainDataset(self.tokenizer, my_load_dataset(train_file), self.max_seq_length)
     eval_dataset = TextMatchingTestDataset(self.tokenizer, load_test_data(eval_file), self.max_seq_length)
 
     # 参数设置
@@ -135,7 +137,7 @@ def train_loop(global_rank, world_size):
 
     # 同样是不使用 shuffle
     sampler = DistributedSampler(train_dataset)
-    train_dataloader = DataLoader(train_dataset, shuffle=False, batch_size=batch_size, sampler=sampler)
+    train_dataloader = DataLoader(train_dataset, shuffle=False, batch_size=batch_size, sampler=sampler, pin_memory=True)
     total_steps = len(train_dataloader) * num_epochs
     param_optimizer = list(self.bert.named_parameters())
     no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]

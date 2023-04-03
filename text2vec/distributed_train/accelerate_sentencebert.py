@@ -29,6 +29,8 @@ from text2vec.text_matching_dataset import (
     load_train_data,
     HFTextMatchingTestDataset,
     HFTextMatchingTrainDataset,
+    my_load_dataset,
+    MyTextMatchingTrainDataset,
 )
 from text2vec.utils.stats_util import set_seed
 
@@ -92,7 +94,9 @@ def train_loop():
     if os.name == "nt":
         # windows 还是没人权
         dist.init_process_group(backend="gloo", init_method="tcp://localhost:23456", rank=0, world_size=1)
-    accelerator = Accelerator()
+    accelerator = Accelerator(
+        # mixed_precision="bf16",  # 并没有提升训练速度
+    )
     # 这就是个 hack 的方式, 就是不用大范围改动原始的代码
     device = accelerator.device
 
