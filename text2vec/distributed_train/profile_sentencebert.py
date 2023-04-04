@@ -184,7 +184,9 @@ def profile_main():
                 break
 
     # 打印性能报告
-    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=100))
+    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=20))
+    # 打开 chrome://tracing/，加载 trace.json 文件
+    prof.export_chrome_trace("trace.json")
 
 
 if __name__ == "__main__":
